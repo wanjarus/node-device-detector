@@ -51,7 +51,7 @@ const CHROME_CLIENT_LIST = ['Chrome', 'Chrome Mobile', 'Chrome Webview'];
 
 let osVersionTruncate;
 let clientVersionTruncate;
-
+let performanceStat;
 /**
  *
  * @param {{skipBotDetection: false, osVersionTruncate: null, clientVersionTruncate: null}} options
@@ -68,6 +68,7 @@ function DeviceDetector(options) {
 
   osVersionTruncate = helper.getPropertyValue(options, "osVersionTruncate", null);
   clientVersionTruncate = helper.getPropertyValue(options, "clientVersionTruncate", null);
+  performanceStat = helper.getPropertyValue(options, "performanceStat", false);
 
   this.init();
 }

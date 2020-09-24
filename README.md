@@ -21,7 +21,7 @@ npm install node-device-detector --only=dev
 # Before upgrading to up version, pls read;
 ### (ChangeLog)
 
-* v1.2.8
+* v1.2.8 ()
     * Update fixtures from the motamo-org/devicedetect package#3.13.0 (update to 2020/09/03)
     * Added new methods: setOsVersionTruncate, setClientVersionTruncate
 
@@ -83,7 +83,6 @@ console.log('result parse', result);
         model: 'Nubia Z7 max'
     }
 }
-
 ```
 
 Result is not detect
@@ -154,8 +153,24 @@ console.log('Result parse commercial model', result);  // result {name: "NX505J"
 ```js
 
 const detector = new DeviceDetector({
-  osVersionTruncate: 0, // Truncate Os version from 5.0 to 5 (default '' or null)
-  clientVersionTruncate: 2  // Truncate Client version Chrome from 43.0.2357 .78 to 43.0.2357 (default '' or null)
+// Truncate Os version from 5.0 to 5 (default '' or null)
+  osVersionTruncate: 0, 
+// Truncate Client version Chrome from 43.0.2357 .78 to 43.0.2357 (default '' or null) 
+  clientVersionTruncate: 2, 
+// Returns resource cost statistics along with the discovery (default false)
+// When enabled, information will be returned along with the detection: 
+// {
+//   time: 18,  // ms
+//   memory : 25000, // kb
+//   countIterateBrand: 20
+//   countIterateModel: 1  
+//   countIterateOs: 1
+//   countIterateClient: 2
+//   countIterateBot: 2
+// }
+  performanceStat: true, 
+
+
 });
 // You can override these settings at any time using special methods, example
 detector.setOsVersionTruncate(0);
