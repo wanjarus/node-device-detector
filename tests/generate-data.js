@@ -1,15 +1,15 @@
 const https = require('https');
+const http = require('http');
 
+const fs = require('fs');
 const util = require('util')
-const readline = require('readline')
-const stream = require('stream')
-const rename = util.promisify(fs.rename)
-const unlink = util.promisify(fs.unlink)
+const readline = require('readline');
+const YAML = require('js-yaml');
 
-const detector = require('../index');
-const alias = require('../parser/device/alias-device')
+const DeviceDetector = require('../index');
+const DeviceAlias = require('../parser/device/alias-device');
 
-const FIXTURE_FOLDER = __dirname + '/fixtures/';
+const FIXTURE_FOLDER = __dirname + '/fixtures';
 const DATA_FILE = __dirname + '/../data/data.txt';
 const TEST_EXCLUDES = ['alias_devices.yml', 'bots.yml'];
 
@@ -18,156 +18,78 @@ const TEST_EXCLUDES = ['alias_devices.yml', 'bots.yml'];
  * @returns {any}
  * @constructor
  */
-function YAMLLoad(yamlPath) {
+function ymlLoad(yamlPath) {
   return YAML.safeLoad(fs.readFileSync(yamlPath, 'utf8'));
 }
 
-function arrayDiff(a, b) {
-  return [...a.filter(x => !b.includes(x)), ...b.filter(x => !a.includes(x))];
-}
-
-/**
- * @author https://github.com/codealchemist/line-replace
- *
- **/
-function lineReplace({file, line, text, addNewLine = true, callback}) {
-  const readStream = fs.createReadStream(file)
-  const tempFile = `${file}.tmp`
-  const writeStream = fs.createWriteStream(tempFile)
-  const rl = readline.createInterface(readStream, stream)
-  let replacedText
-  
-  readStream.on('error', async ({message}) => {
-	await unlink(tempFile)
-	callback({error: message, file, line, replacedText, text})
-  })
-  
-  writeStream.on('error', async ({message}) => {
-	await unlink(tempFile)
-	callback({error: message, file, line, replacedText, text})
-  })
-  
-  rl.on('error', async ({message}) => {
-	await unlink(tempFile)
-	callback({error: message, file, line, replacedText, text})
-  })
-  
-  let currentLine = 0
-  rl.on('line', (originalLine) => {
-	++currentLine
-	
-	// Replace.
-	if (currentLine === line) {
-	  replacedText = originalLine
-	  if (addNewLine) return writeStream.write(`${text}\n`)
-	  return writeStream.write(`${text}`)
-	}
-	
-	// Save original line.
-	writeStream.write(`${originalLine}\n`)
-  })
-  
-  rl.on('close', () => {
-	// Finish writing to temp file and replace files.
-	// Replace original file with fixed file (the temp file).
-	writeStream.end(async () => {
-	  try {
-		await unlink(file) // Delete original file.
-		await rename(tempFile, file) // Rename temp file with original file name.
-	  } catch (error) {
-		callback({error, file, line, replacedText, text})
-		return
-	  }
-	  callback({file, line, replacedText, text})
-	})
-  })
-}
-
-function find({brand, model, codes, type = 'smartphone'}) {
-  return new Promise((resolve, reject) => {
-	const readStream = fs.createReadStream(DATA_FILE)
-	const rl = readline.createInterface(readStream, stream)
-	let position = 0
-	rl.on('line', (line) => {
-	  ++position;
-	  let data = JSON.parse(line);
-	  if (data !== null) {
-		if (!data || data.brand !== undefined && data.brand !== brand) {
-		  return;
-		}
-		
-		let result = Object.assign({}, data);
-		for (let key in data.models) {
-		  // обновление модели
-		  if (key === model) {
-			let newCodes = arrayDiff(result.models[key].codes, codes);
-			newCodes = arrayDiff([key], newCodes);
-			if (newCodes.length > 0) {
-			  newCodes.forEach((code) => {
-				result.models[key].codes.push(code);
-			  })
-			  resolve({result, position, update: true})
-			  rl.close();
-			  return;
-			}
-			resolve({result, position, update: false})
-			rl.close();
-			return;
-		  }
-		}
-		// новая модель
-		result.models[model] = {};
-		result.models[model].codes = codes;
-		resolve({result, position, update: true})
-		rl.close();
-		return;
-	  }
-	})
-	rl.on('end', () => {
-	  resolve(false);
-	});
-  })
-}
-
-function push({brand, model, codes = [], type = 'smartphone'}) {
-  return new Promise((resolve, reject) => {
-	find({brand, model, codes, type}).then((result) => {
-	  //  новая запись
-	  if (result === false) {
-		let data = {brand};
-		data.models = {};
-		data.models[model] = {};
-		data.models[model].codes = codes;
-		fs.appendFileSync(DATA_FILE, JSON.stringify(data) + "\n");
-	  }
-	  // обновление
-	  if (result.update) {
-		lineReplace({
-		  file: DATA_FILE,
-		  line: result.position,
-		  text: JSON.stringify(result.result), addNewLine: true, callback: () => {
-			resolve();
-		  }
-		});
-	  }
-	  
-	})
-  })
-  //  result = aliasDevice.parse(fixture.user_agent);
-}
+const detector = new DeviceDetector;
+const alias = new DeviceAlias;
 
 
-ymlDeviceFiles = fs.readdirSync(FIXTURE_FOLDER + 'devices/');
+let DATA = {};
 
-// each brands in detector
-ymlDeviceFiles.forEach((filename) => {
-  if (TEST_EXCLUDES.includes(filename)) {
-	return;
+if (!fs.existsSync(DATA_FILE)) {
+  fs.closeSync(fs.openSync(DATA_FILE, 'w'))
+} else {
+  DATA = JSON.parse(fs.readFileSync(DATA_FILE));
+  if (DATA === null) {
+	DATA = {};
   }
-  console.log(filename);
-});
+}
 
-const SERVICE = '';
+const request = function (url) {
+  return new Promise((resolve, reject) => {
+	const lib = url.startsWith('https') ? https : http;
+	const request = lib.get(url, (response) => {
+	  if (response.statusCode < 200 || response.statusCode > 299) {
+		reject(new Error('Failed to load page, status code: ' + response.statusCode));
+	  }
+	  const body = [];
+	  response.on('data', (chunk) => body.push(chunk));
+	  response.on('end', () => resolve(body.join('')));
+	});
+	request.on('error', (err) => reject(err))
+  })
+};
+
+function push(brand, model, codes = []) {
+  if (DATA[brand] === void 0) {
+	DATA[brand] = {};
+	DATA[brand]['models'] = {};
+  }
+  if (DATA[brand]['models'][model] === void 0) {
+	DATA[brand]['models'][model] = {};
+	DATA[brand]['models'][model].codes = codes;
+  }
+  let oldCodes = DATA[brand]['models'][model].codes;
+  DATA[brand]['models'][model].codes = [...new Set([...oldCodes, ...codes])];
+}
+
+// генерация из тестов
+
+let ymlDeviceFiles = fs.readdirSync(FIXTURE_FOLDER + '/devices/');
+for (let i = 0, l = ymlDeviceFiles.length; i < l; i++) {
+  let filename = ymlDeviceFiles[i];
+  if (TEST_EXCLUDES.includes(filename)) {
+	continue;
+  }
+  let fixtures = ymlLoad(FIXTURE_FOLDER + '/devices/' + filename);
+  for (let fixture of fixtures) {
+	if (!fixture.device || !fixture.device.brand || !fixture.device.model) {
+	  continue;
+	}
+	let device = fixture.device;
+	let codes = [];
+	let result = alias.parse(fixture.user_agent);
+	if (result.name) {
+	  codes.push(result.name);
+	}
+	push(device.brand, device.model, codes);
+  }
+}
+
+fs.writeFileSync(DATA_FILE, JSON.stringify(DATA, null, 2), {encoding: 'utf8', flag: 'w'});
+
 
 // https://storage.googleapis.com/play_public/supported_devices.csv
 
